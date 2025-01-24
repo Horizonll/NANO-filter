@@ -1,11 +1,14 @@
 import autograd.numpy as np
-from autograd import jacobian, hessian
-from autograd.numpy import sin, cos, arctan, pi, arctan2
+from autograd import jacobian
 from .model import Model
+import rclpy
+from rclpy.node import Node
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
+import time
 
 
 class TurtleBot(Model):
-
     def __init__(
         self,
         state_outlier_flag=False,
@@ -14,14 +17,25 @@ class TurtleBot(Model):
     ):
         super().__init__(self)
         self.dim_x = 3
-        self.dim_y = 2
+        self.dim_y = 3
+        self.dt = 1.0 / 15
         self.x0 = np.array([0.0, 0.0, 0.0])
         self.P0 = np.diag(np.array([0.0001, 0.0001, 0.0001])) ** 2
         self.state_outlier_flag = state_outlier_flag
         self.measurement_outlier_flag = measurement_outlier_flag
         self.noise_type = noise_type
+        self.alpha = 2.0
+        self.beta = 5.0
 
-    def f(self, x, u=None):
+        self.process_std = np.array([0.0034, 0.0056, 0.0041])
+        self.observation_std = np.array(
+            [0.0238, 0.0284, 0.0259, 0.0107, 0.0094, 0.0118]
+        )
+        self.obs_var = np.ones(self.dim_y) * 0.01
+        self.Q = np.diag(self.process_std**2)
+        self.R = np.diag(self.observation_std**2)
+
+    def f(self, x, u):
         pass
 
     def h(self, x):
@@ -67,3 +81,21 @@ class TurtleBot(Model):
 
     def jac_h(self, x_hat, u=0):
         return jacobian(lambda x: self.h(x))(x_hat)
+
+    def wait_for_message(node, topic_type, topic):
+        class _vfm(object):
+            def __init__(self) -> None:
+                self.msg = None
+
+            def cb(self, msg):
+                self.msg = msg
+
+        vfm = _vfm()
+        subscription = node.create_subscription(topic_type, topic, vfm.cb, 1)
+        while rclpy.ok():
+            if vfm.msg != None:
+                return vfm.msg
+            rclpy.spin_once(node)
+            time.sleep(0.001)
+        # unsubcription
+        subscription.destroy()
