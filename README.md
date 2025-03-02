@@ -1,3 +1,9 @@
+数据采集
+
+```bash
+ros2 bag record /scan /odom /sim_ground_truth_pose /wheel_vels
+```
+
 数据回放
 
 ```bash
