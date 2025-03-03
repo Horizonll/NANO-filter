@@ -6,6 +6,7 @@ from rosidl_runtime_py import message_to_ordereddict
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from irobot_create_msgs.msg import WheelVels
+from geometry_msgs.msg import PoseStamped
 
 
 def main():
@@ -13,7 +14,7 @@ def main():
 
     # 配置存储选项
     storage_options = StorageOptions(
-        uri="./data/rosbagdata.db3",  # 替换为你的 bag 文件路径
+        uri="./data/real/rosbagdata.db3",  # 替换为你的 bag 文件路径
         storage_id="sqlite3",  # 通常使用 sqlite3 存储
     )
 
@@ -45,22 +46,22 @@ def main():
         (topic, data, t) = reader.read_next()
         # 根据话题类型反序列化消息
         print(f"Time: {t}, Topic: {topic}")
-        if topic == "/sim_ground_truth_pose":
-            msg = deserialize_message(data, Odometry)
+        if topic == "/Tracker0/pose":
+            msg = deserialize_message(data, PoseStamped)
             ground_truth_t.append(t)
             ground_truth_pose.append(
                 [
-                    msg.pose.pose.position.x,
-                    msg.pose.pose.position.y,
-                    msg.pose.pose.position.z,
+                    msg.pose.position.x,
+                    msg.pose.position.y,
+                    msg.pose.position.z,
                 ]
             )
             ground_truth_ori.append(
                 [
-                    msg.pose.pose.orientation.w,
-                    msg.pose.pose.orientation.x,
-                    msg.pose.pose.orientation.y,
-                    msg.pose.pose.orientation.z,
+                    msg.pose.orientation.w,
+                    msg.pose.orientation.x,
+                    msg.pose.orientation.y,
+                    msg.pose.orientation.z,
                 ]
             )
 
@@ -122,7 +123,7 @@ def main():
         "wheel_t": wheel_t,
     }
 
-    np.savez("./data/raw_data.npz", **all_data)
+    np.savez("./data/real/raw_data.npz", **all_data)
     rclpy.shutdown()
 
 
