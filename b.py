@@ -3,9 +3,65 @@ import cv2
 import numpy as np
 import math
 from tqdm import tqdm
+from sensor_msgs.msg import LaserScan
+import rclpy
+from rclpy.node import Node
+import time
+from collections import deque
+
+data_queue = deque(maxlen=10)  # 保持最近10个位置数据
+MAX_DISTANCE = 30  # 最大允许距离变化
+MAX_YAW = 5 * (math.pi / 180)  # 最大允许角度变化（5度）
 
 
-# 读取地图配置文件
+def check_position(x, y, yaw):
+    # 如果队列为空，直接返回False
+    if not data_queue:
+        data_queue.append((x, y, yaw))
+        return False
+
+    # 添加新数据
+    data_queue.append((x, y, yaw))
+
+    # 如果队列未满，继续匹配
+    if len(data_queue) < data_queue.maxlen:
+        return False
+
+    # 获取第一个和最后一个数据
+    first = data_queue[0]
+    last = data_queue[-1]
+
+    # 计算差值
+    dx = abs(last[0] - first[0])
+    dy = abs(last[1] - first[1])
+    dyaw = abs(last[2] - first[2])
+
+    # 如果所有差值都小于阈值，清空队列并返回True
+    if dx < MAX_DISTANCE and dy < MAX_DISTANCE and dyaw < MAX_YAW:
+        data_queue.clear()
+        return True
+
+    return False
+
+
+def wait_for_message(node, topic_type, topic):
+    class _vfm(object):
+        def __init__(self) -> None:
+            self.msg = None
+
+        def cb(self, msg):
+            self.msg = msg
+
+    vfm = _vfm()
+    subscription = node.create_subscription(topic_type, topic, vfm.cb, 1)
+    while rclpy.ok():
+        if vfm.msg is not None:
+            return vfm.msg
+        rclpy.spin_once(node)
+        time.sleep(0.001)
+    subscription.destroy()
+
+
 def read_map_yaml(yaml_file):
     with open(yaml_file, "r") as f:
         lines = f.readlines()
@@ -21,92 +77,109 @@ def read_map_yaml(yaml_file):
     return map_info
 
 
-# 处理激光雷达扫描数据
 def process_scan(scan_msg, map_info):
-    scan_points = []
-    angle = scan_msg["angle_min"]
-    for r in scan_msg["ranges"]:
-        if scan_msg["range_min"] <= r <= scan_msg["range_max"]:
-            x = r * math.cos(angle) / map_info["resolution"]
-            y = -r * math.sin(angle) / map_info["resolution"]
-            scan_points.append((x, y))
-        angle += scan_msg["angle_increment"]
-    return scan_points
+    angles = np.arange(
+        scan_msg["angle_min"], scan_msg["angle_max"], scan_msg["angle_increment"]
+    )
+    ranges = np.array(scan_msg["ranges"])
+    valid_indices = (ranges >= scan_msg["range_min"]) & (
+        ranges <= scan_msg["range_max"]
+    )
+    ranges = ranges[valid_indices]
+    angles = angles[valid_indices]
+    x = ranges * np.cos(angles) / map_info["resolution"]
+    y = -ranges * np.sin(angles) / map_info["resolution"]
+    return np.column_stack((x, y))
 
 
-# 计算匹配值
 def calculate_matching_value(scan_points, lidar_x, lidar_y, lidar_yaw, map_temp):
-    transform_points = []
-    clockwise_points = []
-    counter_points = []
-    deg_to_rad = math.pi / 180.0
-
-    for point in scan_points:
-        # 情况一：原始角度
-        rotated_x = point[0] * math.cos(lidar_yaw) - point[1] * math.sin(lidar_yaw)
-        rotated_y = point[0] * math.sin(lidar_yaw) + point[1] * math.cos(lidar_yaw)
-        transform_points.append((rotated_x + lidar_x, lidar_y - rotated_y))
-
-        # 情况二：顺时针旋转1度
-        clockwise_yaw = lidar_yaw + deg_to_rad
-        rotated_x = point[0] * math.cos(clockwise_yaw) - point[1] * math.sin(
-            clockwise_yaw
-        )
-        rotated_y = point[0] * math.sin(clockwise_yaw) + point[1] * math.cos(
-            clockwise_yaw
-        )
-        clockwise_points.append((rotated_x + lidar_x, lidar_y - rotated_y))
-
-        # 情况三：逆时针旋转1度
-        counter_yaw = lidar_yaw - deg_to_rad
-        rotated_x = point[0] * math.cos(counter_yaw) - point[1] * math.sin(counter_yaw)
-        rotated_y = point[0] * math.sin(counter_yaw) + point[1] * math.cos(counter_yaw)
-        counter_points.append((rotated_x + lidar_x, lidar_y - rotated_y))
-
-    offsets = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
-    point_sets = [transform_points, clockwise_points, counter_points]
+    deg_to_rad = math.pi / 180.0 * 2
     yaw_offsets = [0, deg_to_rad, -deg_to_rad]
+    offsets = [(0, 0), (5, 0), (-5, 0), (0, 5), (0, -5)]
 
     max_sum = 0
-    best_dx = 0
-    best_dy = 0
-    best_dyaw = 0
+    best_dx, best_dy, best_dyaw = 0, 0, 0
 
-    for i in range(len(offsets)):
-        for j in range(len(point_sets)):
-            sum_val = 0
-            for point in point_sets[j]:
-                px = int(point[0] + offsets[i][0])
-                py = int(point[1] + offsets[i][1])
-                if 0 <= px < map_temp.shape[1] and 0 <= py < map_temp.shape[0]:
-                    sum_val += map_temp[py, px]
+    for yaw_offset in yaw_offsets:
+        cos_yaw = np.cos(lidar_yaw + yaw_offset)
+        sin_yaw = np.sin(lidar_yaw + yaw_offset)
+        rotated_points = np.dot(
+            scan_points, np.array([[cos_yaw, -sin_yaw], [sin_yaw, cos_yaw]])
+        )
+        transformed_points = rotated_points + np.array([lidar_x, lidar_y])
+
+        for dx, dy in offsets:
+            shifted_points = transformed_points + np.array([dx, dy])
+            valid_indices = (
+                (shifted_points[:, 0] >= 0)
+                & (shifted_points[:, 0] < map_temp.shape[1])
+                & (shifted_points[:, 1] >= 0)
+                & (shifted_points[:, 1] < map_temp.shape[0])
+            )
+            valid_points = shifted_points[valid_indices].astype(int)
+            sum_val = np.sum(map_temp[valid_points[:, 1], valid_points[:, 0]])
+
             if sum_val > max_sum:
                 max_sum = sum_val
-                best_dx = offsets[i][0]
-                best_dy = offsets[i][1]
-                best_dyaw = yaw_offsets[j]
+                best_dx, best_dy, best_dyaw = dx, dy, yaw_offset
 
     return best_dx, best_dy, best_dyaw
 
 
-# 主函数
+def create_gradient_mask(size):
+    center = size // 2
+    y, x = np.ogrid[:size, :size]
+    distance = np.hypot(x - center, y - center)
+    mask = np.clip(255 * (1 - distance / center), 0, 255).astype(np.uint8)
+    return mask
+
+
+def process_map(map_raw):
+    map_temp = np.zeros_like(map_raw, dtype=np.uint8)
+    gradient_mask = create_gradient_mask(91)
+    mask_center = gradient_mask.shape[0] // 2
+
+    # 获取所有为0的点的坐标
+    zero_points = np.argwhere(map_raw == 0)
+
+    for y, x in zero_points:
+        left = max(0, x - mask_center)
+        top = max(0, y - mask_center)
+        right = min(map_raw.shape[1] - 1, x + mask_center)
+        bottom = min(map_raw.shape[0] - 1, y + mask_center)
+        roi = map_temp[top : bottom + 1, left : right + 1]
+        mask_left = mask_center - (x - left)
+        mask_top = mask_center - (y - top)
+        mask_roi = gradient_mask[
+            mask_top : mask_top + roi.shape[0],
+            mask_left : mask_left + roi.shape[1],
+        ]
+
+        np.maximum(roi, mask_roi, out=roi)
+
+    return map_temp
+
+
 def main():
+    rclpy.init()
+    node = Node("data")
     scan_data_path = "./data/sim/raw_data.npz"
     map_info = read_map_yaml("./data/sim/map.yaml")
-    scan_data = np.load(scan_data_path)["scan"]
     map_raw = cv2.imread(map_info["image"], cv2.IMREAD_GRAYSCALE)
-    lidar_x = 0
-    lidar_y = 0
-    lidar_yaw = 0
-    scan_pose = []
-    for scan in tqdm(scan_data[:1000]):
+    map_raw = process_map(map_raw)
+    # cv2.imshow("map", map_raw)
+    # cv2.waitKey(0)
+    lidar_x, lidar_y, lidar_yaw = 200, 200, 0
+
+    while True:
+        scan = wait_for_message(node, LaserScan, "/scan")
         scan_msg = {
             "angle_min": -math.pi,
             "angle_max": math.pi,
             "angle_increment": math.pi / 320,
             "range_min": 0.1,
             "range_max": 12.0,
-            "ranges": scan,
+            "ranges": scan.ranges,
         }
         scan_points = process_scan(scan_msg, map_info)
         while True:
@@ -116,17 +189,14 @@ def main():
             lidar_x += best_dx
             lidar_y += best_dy
             lidar_yaw += best_dyaw
+            if check_position(lidar_x, lidar_y, lidar_yaw):
+                break
             if abs(best_dx) < 1 and abs(best_dy) < 1 and abs(best_dyaw) < 0.01:
                 break
-        scan_pose.append((lidar_x, lidar_y))
-
-    scan_pose = np.array(scan_pose)
-    plt.plot(scan_pose[:, 0], scan_pose[:, 1], marker="o")
-    plt.title("Lidar Scan Trajectory")
-    plt.xlabel("X position")
-    plt.ylabel("Y position")
-    plt.grid()
-    plt.show()
+        print(
+            f"{(lidar_y - 200) * map_info['resolution']:.2f}",
+            f"{(lidar_x - 200) * map_info['resolution']:.2f}",
+        )
 
 
 if __name__ == "__main__":
