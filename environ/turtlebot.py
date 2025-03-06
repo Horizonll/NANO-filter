@@ -48,12 +48,12 @@ class TurtleBot(Model):
             "angle_min": -math.pi,
             "angle_max": math.pi,
             "angle_increment": math.pi / 320,
-            "range_min": 0.1,
+            "range_min": 0.16,
             "range_max": 12.0,
             "ranges": scan,
         }
         lidar_x, lidar_y, lidar_yaw = x[0], x[1], x[2]
-        scan_points = self.process_scan(scan_msg, self.map_info)
+        scan_points = self.process_scan(scan_msg)
         while True:
             best_dx, best_dy, best_dyaw = self.calculate_matching_value(
                 scan_points, lidar_x, lidar_y, lidar_yaw, self.map_raw
