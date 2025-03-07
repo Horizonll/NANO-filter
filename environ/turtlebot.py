@@ -1,7 +1,6 @@
 import autograd.numpy as np
 from autograd import jacobian
-from model import Model
-import numpy as np
+from .model import Model
 import math
 
 
@@ -192,7 +191,7 @@ class TurtleBot(Model):
             )
 
     def jac_f(self, x_hat, u=0):
-        return jacobian(lambda x: self.f(x))(x_hat)
+        return jacobian(lambda x: self.f(x, u))(x_hat)
 
     def jac_h(self, x_hat, u=0):
         return jacobian(lambda x: self.h(x))(x_hat)

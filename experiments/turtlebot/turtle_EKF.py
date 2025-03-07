@@ -7,7 +7,9 @@ import importlib
 import autograd.numpy as np
 from tqdm import tqdm
 
-sys.path.append(".../")
+sys.path.append("/home/hrz/NANO-filter")
+sys.path.append("../")
+
 from filter import NANO, EKF, UKF
 from environ import UGV, TurtleBot
 from data_processing import load_data
@@ -53,10 +55,10 @@ if __name__ == "__main__":
     scan_ = []
     wheel_vel_ = []
 
-    for time in time_gt:
-        idx = np.argmin(np.abs(scan_t - time))
+    for t in time_gt:
+        idx = np.argmin(np.abs(scan_t - t))
         scan_.append(scan[idx])
-        idx = np.argmin(np.abs(wheel_t - time))
+        idx = np.argmin(np.abs(wheel_t - t))
         wheel_vel_.append(wheel_vel[idx])
 
     scan = np.array(scan_)
@@ -74,7 +76,7 @@ if __name__ == "__main__":
     x_pred = []
     all_time = []
 
-    for i in tqdm.tqdm(range(0, wheel_t.shape[0])):
+    for i in tqdm(range(0, wheel_t.shape[0])):
         u = wheel_vel[i]
         y = scan[i]
         time1 = time.time()
