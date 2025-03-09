@@ -6,7 +6,7 @@ from rosidl_runtime_py import message_to_ordereddict
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from irobot_create_msgs.msg import WheelVels
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
 
     # 配置存储选项
     storage_options = StorageOptions(
-        uri="./data/real/rosbagdata.db3",  # 替换为你的 bag 文件路径
+        uri="./data/amcl/2.db3",  # 替换为你的 bag 文件路径
         storage_id="sqlite3",  # 通常使用 sqlite3 存储
     )
 
@@ -41,7 +41,8 @@ def main():
     odom_t = []
     wheel_vels = []
     wheel_t = []
-
+    amcl = []
+    gt = []
     while reader.has_next():
         (topic, data, t) = reader.read_next()
         # 根据话题类型反序列化消息
@@ -98,7 +99,12 @@ def main():
                     msg.velocity_right,
                 ]
             )
-
+        if topic == "/amcl_pose":
+            msg = deserialize_message(data, PoseWithCovarianceStamped)
+            amcl.append([msg.pose.pose.position.x, msg.pose.pose.position.y])
+        if topic == "/sim_ground_truth_pose":
+            msg = deserialize_message(data, Odometry())
+            gt.append([msg.pose.pose.position.x, msg.pose.pose.position.y])
     scan = np.array(scan)
     scan_t = np.array(scan_t)
     ground_truth_pose = np.array(ground_truth_pose)
@@ -109,7 +115,8 @@ def main():
     odom_t = np.array(odom_t)
     wheel_vels = np.array(wheel_vels)
     wheel_t = np.array(wheel_t)
-
+    amcl = np.array(amcl)
+    gt = np.array(gt)
     all_data = {
         "scan": scan,
         "scan_t": scan_t,
@@ -122,8 +129,8 @@ def main():
         "wheel_vels": wheel_vels,
         "wheel_t": wheel_t,
     }
-
-    np.savez("./data/real/raw_data.npz", **all_data)
+    np.save("./data/amcl/2.npy", amcl)
+    # np.savez("./data/real/raw_data.npz", **all_data)
     rclpy.shutdown()
 
 
