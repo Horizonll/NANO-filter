@@ -3,11 +3,12 @@ import sys
 import time
 import argparse
 import importlib
-
+from math import sqrt
 import autograd.numpy as np
 from tqdm import tqdm
 
 sys.path.append("/home/hrz/NANO-filter")
+sys.path.append("D:/code/NANO-filter")
 sys.path.append("../")
 
 from filter import NANO, EKF, UKF
@@ -76,20 +77,21 @@ if __name__ == "__main__":
     x_pred = []
     all_time = []
 
-    for i in tqdm(range(0, wheel_t.shape[0])):
+    for i in tqdm(range(0, pos_gt.shape[0])):
         u = wheel_vel[i]
-        y = scan[i]
+        # y = scan[i]
         time1 = time.time()
         # perform filtering
         filter.predict(u)
         # TODO 2: 这里观测模型h(x)有了，y是什么呢
+        y = filter.scan_to_pose(filter.x, scan[i])
         filter.update(y)
         time2 = time.time()
         x_pred.append(filter.x)
         all_time.append(time2 - time1)
-
+        # print(sqrt(np.sum((x_pred[-1] - pos_gt[i]) ** 2)))
     x_pred = np.array(x_pred)
     mean_time = np.mean(all_time)
 
-    np.save("./results/turtle_ekf", x_pred)
+    np.save("./results/turtle_ekf.npy", x_pred)
     print("solve time: ", mean_time)

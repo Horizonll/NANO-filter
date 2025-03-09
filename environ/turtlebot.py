@@ -2,6 +2,7 @@ import autograd.numpy as np
 from autograd import jacobian
 from .model import Model
 import math
+import cv2
 
 
 class TurtleBot(Model):
@@ -24,12 +25,13 @@ class TurtleBot(Model):
         self.beta = 5.0
         self.process_std = np.array([0.0034, 0.0056, 0.0041])
         self.observation_std = np.array(
-            [0.0238, 0.0284, 0.0259, 0.0107, 0.0094, 0.0118]
+            [0.0238, 0.0284, 0.0259]
         )
         self.obs_var = np.ones(self.dim_y) * 0.01
         self.Q = np.diag(self.process_std**2)
         self.R = np.diag(self.observation_std**2)
         self.map_info = self.read_map_yaml("./data/sim/map.yaml")
+        self.map_raw = cv2.imread(self.map_info["image"], cv2.IMREAD_GRAYSCALE)
 
     def f(self, x, u):
         v = (u[0] + u[1]) / 2
@@ -42,7 +44,36 @@ class TurtleBot(Model):
             ]
         )
 
-    def h(self, x, scan):
+    def h(self, x, scan=None):
+        # scan_msg = {
+        #     "angle_min": -math.pi,
+        #     "angle_max": math.pi,
+        #     "angle_increment": math.pi / 320,
+        #     "range_min": 0.16,
+        #     "range_max": 12.0,
+        #     "ranges": scan,
+        # }
+        # lidar_x, lidar_y, lidar_yaw = x[0], x[1], x[2]
+        # scan_points = self.process_scan(scan_msg)
+        # while True:
+        #     best_dx, best_dy, best_dyaw = self.calculate_matching_value(
+        #         scan_points, lidar_x, lidar_y, lidar_yaw, self.map_raw
+        #     )
+        #     lidar_x += best_dx
+        #     lidar_y += best_dy
+        #     lidar_yaw += best_dyaw
+        #     if abs(best_dx) < 1 and abs(best_dy) < 1 and abs(best_dyaw) < 0.01:
+        #         break
+        # return np.array(
+        #     [
+        #         (lidar_y - 200) * self.map_info["resolution"],
+        #         (lidar_x - 200) * self.map_info["resolution"],
+        #         lidar_yaw,
+        #     ]
+        # )
+        return np.array([x[0], x[1], x[2]])
+
+    def scan_to_pose(self, x, scan):
         scan_msg = {
             "angle_min": -math.pi,
             "angle_max": math.pi,
